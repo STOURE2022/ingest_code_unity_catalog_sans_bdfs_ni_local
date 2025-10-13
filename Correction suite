@@ -1,0 +1,77 @@
+I can see the issue! Your pipeline is failing because it can't find the ZIP file at the expected location.
+🔍 Error Analysis
+FileNotFoundError: [Errno 2] No such file or directory: 
+'/Volumes/abu_catalog/databricksassetbundletest/externalvolumetes/input/wax_data.zip'
+The pipeline is looking for wax_data.zip in the Unity Catalog Volume but can't find it.
+🛠️ Solutions
+Option 1: Check if the file exists
+Run this in a Databricks notebook to verify the Volume structure:
+# Check if Volume exists
+dbutils.fs.ls("/Volumes/abu_catalog/databricksassetbundletest/externalvolumetes/")
+
+# Check input directory
+dbutils.fs.ls("/Volumes/abu_catalog/databricksassetbundletest/externalvolumetes/input/")
+Option 2: Upload the missing file
+If the file doesn't exist, you need to upload wax_data.zip:
+# Create the input directory if it doesn't exist
+dbutils.fs.mkdirs("/Volumes/abu_catalog/databricksassetbundletest/externalvolumetes/input/")
+
+# Then upload wax_data.zip through the Databricks UI or programmatically
+Option 3: Verify your configuration
+Check if your config matches your actual Unity Catalog setup:
+# In your main.py or a test notebook:
+from config import Config
+
+config = Config(
+    catalog="abu_catalog",
+    schema_files="databricksassetbundletest", 
+    volume="externalvolumetes",
+    schema_tables="gdp_poc_dev",
+    env="dev"
+)
+
+print(f"Expected ZIP path: {config.zip_path}")
+print(f"Expected Excel path: {config.excel_path}")
+
+# Verify these paths exist:
+import os
+print(f"ZIP exists: {os.path.exists(config.zip_path)}")
+print(f"Excel exists: {os.path.exists(config.excel_path)}")
+Option 4: Add better error handling
+Modify file_processor.py to give more helpful errors:
+def extract_zip(self):
+    """Extrait ZIP dans volume Unity Catalog"""
+    print("📦 Extraction ZIP...")
+    
+    zip_path = self.config.zip_path
+    extract_dir = self.config.extract_dir
+    
+    # ✅ ADD THIS CHECK
+    if not os.path.exists(zip_path):
+        available_files = []
+        input_dir = os.path.dirname(zip_path)
+        if os.path.exists(input_dir):
+            available_files = os.listdir(input_dir)
+        
+        raise FileNotFoundError(
+            f"❌ ZIP file not found: {zip_path}\n"
+            f"📂 Input directory: {input_dir}\n"
+            f"📄 Available files: {available_files if available_files else 'Directory is empty or does not exist'}\n"
+            f"💡 Please upload wax_data.zip to the input directory"
+        )
+    
+    # Create extraction directory
+    os.makedirs(extract_dir, exist_ok=True)
+    
+    # Extract
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_dir)
+    
+    print(f"✅ ZIP extrait : {extract_dir}")
+📋 Quick Checklist
+✅ Verify Unity Catalog Volume exists
+✅ Verify input/ folder exists in the Volume
+✅ Upload wax_data.zip to the correct location
+✅ Upload wax_config.xlsx to the correct location
+✅ Ensure file permissions are correct
+Which solution would you like to try first? I can help you implement any of these fixes!
