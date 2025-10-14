@@ -444,4 +444,121 @@ def main():
                 masking_applied=(output_zone == "secret"),
                 error_msg=f"{metrics['anomalies_total']} errors" if metrics["anomalies_total"] > 0 else None,
                 status="SUCCESS", error_count=metrics["anomalies_total"],
-                start_t
+                start_time=start_file_time
+            )
+
+            duration = round(time.time() - start_file_time, 2)
+            print(f"\n✅ Fichier {filename_current} traité en {duration}s")
+            total_success += 1
+            total_files_processed += 1
+
+    # ========== RÉSUMÉ FINAL ==========
+
+    print("\n" + "=" * 80)
+    print("🎉 TRAITEMENT TERMINÉ")
+    print("=" * 80)
+    print(f"✅ Fichiers traités avec succès : {total_files_processed}")
+    print(f"❌ Échecs : {total_failed}")
+
+    if total_files_processed > 0:
+        print(f"\n📊 Tables créées dans : {config.catalog}.{config.schema_tables}")
+        print(f"   Format: <table_name>_all (historique) et <table_name>_last (courant)")
+
+        # Lister les tables créées
+        print(f"\n📋 Tables disponibles :")
+        try:
+            tables = spark.sql(f"SHOW TABLES IN {config.catalog}.{config.schema_tables}").collect()
+            wax_tables = [t for t in tables if "_all" in t.tableName or "_last" in t.tableName]
+            
+            for table in wax_tables:
+                table_full = f"{config.catalog}.{config.schema_tables}.{table.tableName}"
+                count = spark.table(table_full).count()
+                print(f"   - {table.tableName}: {count:,} lignes")
+        except Exception as e:
+            print(f"   ⚠️ Impossible de lister les tables : {e}")
+
+    print("=" * 80)
+
+    # ========== DASHBOARDS ==========
+
+    if total_files_processed > 0:
+        try:
+            print("\n" + "=" * 80)
+            print("📊 GÉNÉRATION DES DASHBOARDS")
+            print("=" * 80)
+            dashboard_manager.display_all_dashboards()
+        except Exception as e:
+            print(f"⚠️ Erreur dashboards : {e}")
+            import traceback
+            traceback.print_exc()
+
+    print("\n🎯 Pipeline terminé !")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## ✅ **Changements Apportés**
+
+### **Ce qui a été ENLEVÉ :**
+- ❌ Toute la logique `merge_files_flag`
+- ❌ Le paramètre `process_all_separately`
+- ❌ Le mode fusion
+- ❌ Toute la branche conditionnelle `if merge_mode / else`
+- ❌ Les références aux colonnes Excel pour la fusion
+
+### **Ce qui RESTE :**
+- ✅ **Traitement séparé de TOUS les fichiers**
+- ✅ **Un log par fichier**
+- ✅ **FILE_NAME_RECEIVED** ajouté automatiquement
+- ✅ **Traçabilité complète** par fichier
+- ✅ Code **plus simple et lisible**
+
+## 📊 **Comportement**
+```
+Pour chaque table dans Excel:
+  Pour chaque fichier matchant le pattern:
+    ✅ Lire le fichier
+    ✅ Valider
+    ✅ Typer les colonnes
+    ✅ Ingérer SÉPARÉMENT dans la table
+    ✅ Logger individuellement
+```
+
+## 📝 **Configuration Excel (Simplifiée)**
+
+**Onglet "File-Table"** - Plus besoin des colonnes de fusion :
+
+| Delta Table Name | Filename Pattern | Input Format | Ingestion mode | ... |
+|-----------------|------------------|--------------|----------------|-----|
+| site | site_<yyyy><mm><dd>_*.csv | csv | FULL_SNAPSHOT | ... |
+
+## 🎯 **Résultat Attendu**
+
+Avec 3 fichiers `site_20250902_*.csv`, `site_20250906_*.csv`, `site_20251302_*.csv` :
+```
+📄 FICHIER 1/3
+   Table: site
+   Fichier: site_20250902_120001.csv
+   ✅ 105,628 lignes
+   ✅ Traité en 32.5s
+
+📄 FICHIER 2/3
+   Table: site
+   Fichier: site_20250906_120001.csv
+   ✅ 105,628 lignes
+   ✅ Traité en 33.2s
+
+📄 FICHIER 3/3
+   Table: site
+   Fichier: site_20251302_120001.csv
+   ❌ Rejeté (mois 13 invalide)
+
+🎉 TRAITEMENT TERMINÉ
+✅ Fichiers traités: 2
+❌ Échecs: 1
+
+📊 Tables disponibles:
+   - site_all: 211,256 lignes (historique)
+   - site_last: 105,628 lignes (dernier fichier)
