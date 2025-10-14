@@ -1,0 +1,82 @@
+Solution : Logger les Rejets Manuellement dans main.py
+Trouvez cette section dans votre main.py (ligne ~200) :
+# Validation noms fichiers
+files_to_read = []
+for fi in matched:
+    parts = extract_parts_from_filename(fi.name)
+    if validator.validate_filename(fi.name, source_table, fi.path, config.log_quality_path):
+        files_to_read.append((fi.path, parts))
+
+if not files_to_read:
+    print(f"⚠️ Tous fichiers rejetés")
+    logger_manager.log_execution(source_table, "N/A", input_format, ingestion_mode,
+                                 output_zone, error_msg="All files rejected",
+                                 status="FAILED", start_time=start_table_time)
+    total_failed += 1
+    continue
+Et remplacez par :
+# ========== VALIDATION NOMS FICHIERS AVEC LOGGING ==========
+
+print(f"\n🔍 Validation des noms de fichiers...")
+
+files_to_read = []
+rejected_count = 0
+
+for fi in matched:
+    parts = extract_parts_from_filename(fi.name)
+    
+    # Valider le fichier
+    is_valid = validator.validate_filename(fi.name, source_table, fi.path, config.log_quality_path)
+    
+    if is_valid:
+        files_to_read.append((fi.path, parts))
+        print(f"   ✅ {fi.name}")
+    else:
+        # ✨ NOUVEAU : Logger le rejet dans execution_logs
+        print(f"   ❌ {fi.name} - Rejeté")
+        
+        # Déterminer la raison du rejet
+        if not parts:
+            reason = "Invalid filename format"
+        elif parts.get('mm', 0) > 12 or parts.get('mm', 0) < 1:
+            reason = f"Invalid date: Month {parts.get('mm', 0)} invalid"
+        elif parts.get('dd', 0) > 31 or parts.get('dd', 0) < 1:
+            reason = f"Invalid date: Day {parts.get('dd', 0)} invalid"
+        else:
+            reason = "Validation failed: Invalid filename"
+        
+        # Logger dans execution_logs
+        logger_manager.log_execution(
+            table_name=source_table,
+            filename=fi.name,
+            input_format=input_format,
+            ingestion_mode=ingestion_mode,
+            output_zone=output_zone,
+            row_count=0,
+            column_count=0,
+            error_msg=reason,
+            status="FAILED",
+            start_time=time.time()
+        )
+        
+        rejected_count += 1
+        total_failed += 1
+
+# Résumé validation
+if rejected_count > 0:
+    print(f"\n⚠️  {rejected_count} fichier(s) rejeté(s)")
+
+if not files_to_read:
+    print(f"⚠️ Tous les fichiers ont été rejetés lors de la validation")
+    continue
+
+print(f"✅ {len(files_to_read)} fichier(s) validé(s) pour traitement\n")
+📊 Résultat Attendu
+Après cette modification, lors de l'exécution vous verrez :
+🔍 Validation des noms de fichiers...
+   ✅ site_20250902_120001.csv
+   ✅ site_20250906_120001.csv
+   ❌ site_20251302_120001.csv - Rejeté
+
+⚠️  1 fichier(s) rejeté(s)
+✅ 2 fichier(s) validé(s) pour traitement
