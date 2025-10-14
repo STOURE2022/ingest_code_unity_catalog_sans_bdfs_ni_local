@@ -1,0 +1,74 @@
+Remplacez juste la fonction _print_rejected_files() dans votre fichier simple_report_manager.py :
+def _print_rejected_files(self):
+    """Liste des fichiers rejetés avec raisons (tous types de rejets)"""
+    
+    print("\n" + "-" * 100)
+    print("❌ FICHIERS REJETÉS")
+    print("-" * 100)
+    
+    rejected_files = []
+    
+    # ========== 1. REJETS DANS EXECUTION_LOGS (échecs de traitement) ==========
+    try:
+        exec_table = f"{self.config.catalog}.{self.config.schema_tables}.wax_execution_logs"
+        
+        if self._table_exists(exec_table):
+            failed_df = self.spark.table(exec_table).filter(
+                (F.to_date(F.col("log_ts")) == F.current_date()) &
+                (F.col("status") == "FAILED")
+            )
+            
+            for row in failed_df.collect():
+                rejected_files.append({
+                    "filename": row.filename,
+                    "table": row.table_name,
+                    "reason": row.error_message if row.error_message else "Unknown error",
+                    "time": row.log_ts.strftime("%H:%M:%S") if row.log_ts else "N/A"
+                })
+    except Exception as e:
+        pass  # Ignorer silencieusement les erreurs
+    
+    # ========== 2. REJETS DANS QUALITY_ERRORS (rejets de validation) ==========
+    try:
+        quality_table = f"{self.config.catalog}.{self.config.schema_tables}.wax_data_quality_errors"
+        
+        if self._table_exists(quality_table):
+            # Chercher les rejets de fichiers (colonne "filename")
+            filename_errors = self.spark.table(quality_table).filter(
+                (F.to_date(F.col("log_ts")) == F.current_date()) &
+                (F.col("column_name") == "filename")
+            )
+            
+            for row in filename_errors.collect():
+                # Vérifier si pas déjà dans la liste
+                if not any(f["filename"] == row.filename for f in rejected_files):
+                    # Construire raison depuis error_message
+                    reason = row.error_message if row.error_message else "Validation failed"
+                    
+                    rejected_files.append({
+                        "filename": row.filename,
+                        "table": row.table_name,
+                        "reason": reason,
+                        "time": row.log_ts.strftime("%H:%M:%S") if row.log_ts else "N/A"
+                    })
+    except Exception as e:
+        pass  # Ignorer silencieusement les erreurs
+    
+    # ========== AFFICHAGE ==========
+    
+    if not rejected_files:
+        print("   ✅ Aucun fichier rejeté")
+        return
+    
+    print(f"\n   🚫 {len(rejected_files)} fichier(s) rejeté(s):\n")
+    
+    for idx, file_info in enumerate(rejected_files, 1):
+        print(f"   {idx}. {file_info['filename']}")
+        print(f"      • Table      : {file_info['table']}")
+        print(f"      • Raison     : {file_info['reason']}")
+        print(f"      • Heure      : {file_info['time']}")
+        print()
+📝 C'est tout !
+Vous n'avez RIEN à changer dans main.py ! Le rapport ira chercher les rejets dans 2 endroits :
+✅ wax_execution_logs → Échecs de traitement
+✅ wax_data_quality_errors → Rejets de validation (dont votre fichier avec mois 13)
