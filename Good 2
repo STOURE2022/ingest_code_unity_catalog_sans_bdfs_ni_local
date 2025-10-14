@@ -1,0 +1,12 @@
+# ========== ✨ NOUVEAU : INITIALISATION TABLES DE LOGS ==========
+
+print("🔧 Initialisation tables de logs...")
+try:
+    dashboard_manager.create_execution_logs_table()
+    dashboard_manager.create_quality_logs_table()
+    print("✅ Tables de logs prêtes\n")
+except Exception as e:
+    print(f"⚠️ Avertissement tables logs : {e}\n")
+    # Continuer même si erreur (les tables existent peut-être déjà)
+
+# ========== EXTRACTION ZIP ==========
