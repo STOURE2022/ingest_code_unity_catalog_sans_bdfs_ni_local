@@ -1,0 +1,176 @@
+def main():
+    """Point d'entrée pipeline"""
+    
+    # ... tout le code existant ...
+    
+    # ========== RÉSUMÉ FINAL ==========
+    
+    execution_time = time.time() - start_total_time  # Ajouter au début: start_total_time = time.time()
+    
+    print("\n" + "=" * 80)
+    print("🎉 TRAITEMENT TERMINÉ")
+    print("=" * 80)
+    print(f"✅ Fichiers traités avec succès : {total_files_processed}")
+    print(f"❌ Échecs : {total_failed}")
+    print("=" * 80)
+
+    # ========== RAPPORT COMPLET ==========
+    
+    if total_files_processed > 0 or total_failed > 0:
+        try:
+            from report_manager import ReportManager
+            
+            report_manager = ReportManager(spark, config)
+            
+            # Générer rapport console
+            report_manager.generate_full_report(
+                total_files_processed=total_files_processed,
+                total_failed=total_failed,
+                total_tables=len(file_tables_df),
+                execution_time=execution_time
+            )
+            
+            # Exporter rapports (optionnel)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            report_manager.export_to_json(
+                f"{config.volume_base}/reports/report_{timestamp}.json"
+            )
+            report_manager.export_to_html(
+                f"{config.volume_base}/reports/report_{timestamp}.html"
+            )
+            
+        except Exception as e:
+            print(f"⚠️ Erreur génération rapport : {e}")
+            import traceback
+            traceback.print_exc()
+
+    # ========== DASHBOARDS ==========
+    
+    if total_files_processed > 0:
+        try:
+            dashboard_manager.display_all_dashboards()
+        except Exception as e:
+            print(f"⚠️ Erreur dashboards : {e}")
+
+    print("\n🎯 Pipeline terminé !")
+
+
+if __name__ == "__main__":
+    start_total_time = time.time()  # ← Ajouter ici
+    main()
+```
+
+## 📊 **Exemple de Rapport Généré**
+```
+================================================================================
+📊 RAPPORT COMPLET D'EXÉCUTION - WAX PIPELINE
+================================================================================
+
+================================================================================
+📋 1. RÉSUMÉ GÉNÉRAL
+================================================================================
+
+🕒 Date d'exécution    : 2025-10-14 15:30:00
+⏱️  Durée totale        : 67.31 secondes (1.12 minutes)
+🌍 Environnement       : dev
+📚 Catalogue           : abu_catalog
+🗄️  Schéma tables       : gdp_poc_dev
+
+📊 STATISTIQUES GLOBALES:
+   ✅ Fichiers traités avec succès : 2
+   ❌ Fichiers en échec            : 1
+   📋 Tables configurées           : 1
+   📈 Taux de succès               : 66.7%
+
+================================================================================
+📄 2. DÉTAILS PAR FICHIER
+================================================================================
+
++----------+---------------------------+------+---------+--------+-------+---------+----------+
+|Table     |Fichier                    |Lignes|Colonnes |Erreurs |Statut |Durée (s)|Heure     |
++----------+---------------------------+------+---------+--------+-------+---------+----------+
+|site      |site_20250902_120001.csv   |105628|31       |0       |SUCCESS|32.5     |15:30:00  |
+|site      |site_20250906_120001.csv   |105628|31       |0       |SUCCESS|33.2     |15:30:35  |
+|site      |site_20251302_120001.csv   |0     |0        |0       |FAILED |0.1      |15:31:00  |
++----------+---------------------------+------+---------+--------+-------+---------+----------+
+
+📊 Statistiques des fichiers:
+   📈 Total lignes traitées : 211,256
+   ⚠️  Total erreurs         : 0
+   ⏱️  Durée moyenne         : 32.85s
+   ⏱️  Durée max             : 33.20s
+
+================================================================================
+🗄️  3. DÉTAILS PAR TABLE
+================================================================================
+
+📋 Tables créées:
+----------------
+
+📊 site_all
+   Lignes          : 211,256
+   Colonnes        : 33
+   Partitions      : 2
+   Dates           : 2025-09-02, 2025-09-06
+   Fichiers sources: 2
+      - site_20250902_120001
+      - site_20250906_120001
+
+📊 site_last
+   Lignes          : 105,628
+   Colonnes        : 33
+   Partitions      : 1
+   Dates           : 2025-09-06
+
+📊 Résumé tables:
+   🗄️  Nombre de tables       : 2
+   📈 Total lignes           : 316,884
+   📁 Total fichiers sources : 2
+
+================================================================================
+✅ 4. QUALITÉ DES DONNÉES
+================================================================================
+
+   ✅ Aucune erreur de qualité détectée aujourd'hui
+
+================================================================================
+⚡ 5. PERFORMANCE
+================================================================================
+
+📊 Performance par table:
++----------+----------+----------+-------+-------+-------+--------+
+|table_name|executions|total_rows|avg_dur|min_dur|max_dur|lignes/s|
++----------+----------+----------+-------+-------+-------+--------+
+|site      |2         |211256    |32.85  |32.5   |33.2   |6432    |
++----------+----------+----------+-------+-------+-------+--------+
+
+================================================================================
+🚨 6. ERREURS ET ALERTES
+================================================================================
+
+❌ 1 fichier(s) en échec:
+
++----------+---------------------------+---------------------------+----------+
+|table_name|filename                   |error_message              |time      |
++----------+---------------------------+---------------------------+----------+
+|site      |site_20251302_120001.csv   |Invalid date: Month 13     |15:31:00  |
++----------+---------------------------+---------------------------+----------+
+
+================================================================================
+💡 7. RECOMMANDATIONS
+================================================================================
+
+📋 Actions recommandées:
+
+   1. ⚠️  1 fichier rejeté - Vérifier la validité des dates dans les noms de fichiers
+
+💡 Bonnes pratiques:
+   1. Exécuter OPTIMIZE sur les tables volumineuses chaque semaine
+   2. Exécuter VACUUM pour nettoyer les anciennes versions (retention 7 jours)
+   3. Surveiller les logs de qualité quotidiennement
+   4. Archiver les fichiers traités
+   5. Vérifier les dashboards d'observabilité régulièrement
+
+================================================================================
+✅ Rapport terminé
+================================================================================
