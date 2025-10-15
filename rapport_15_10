@@ -1,0 +1,21 @@
+Voici un discours professionnel pour votre chef :
+
+---
+
+**"Présentation du Pipeline d'Ingestion WAX"**
+
+J'ai développé un **pipeline d'ingestion de données robuste** sur Databricks Unity Catalog qui automatise le traitement de fichiers CSV provenant de sources externes.
+
+Le pipeline effectue plusieurs validations critiques : vérification des noms de fichiers et dates, validation des colonnes attendues, typage des données selon les règles métier, et contrôle qualité complet. Chaque fichier est traité individuellement pour garantir une traçabilité maximale.
+
+Les données sont stockées dans deux tables Delta pour chaque source : une table historique (`_all`) qui conserve tous les fichiers traités, et une table courante (`_last`) qui contient uniquement les données du dernier fichier. Cette architecture permet à la fois l'analyse historique et l'accès rapide aux données actuelles.
+
+Le système intègre un **logging exhaustif** dans deux tables dédiées : une pour les exécutions (succès/échecs) et une pour les erreurs qualité. À la fin de chaque exécution, un rapport synthétique est généré automatiquement, indiquant les fichiers traités avec succès, les fichiers rejetés avec leurs raisons d'échec, et les statistiques des tables créées.
+
+L'avantage principal est la **traçabilité complète** : chaque ligne de données conserve la référence du fichier source, permettant des audits précis. Le système détecte et rejette automatiquement les fichiers invalides (dates incorrectes, colonnes manquantes, données corrompues) avant l'ingestion.
+
+Le pipeline est prêt pour la production et peut traiter plusieurs tables simultanément selon la configuration Excel fournie.
+
+---
+
+**Concis : 14 lignes** ✅
