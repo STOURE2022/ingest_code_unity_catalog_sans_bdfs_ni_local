@@ -1,0 +1,24 @@
+┌─────────────────────────────────────┐
+│  1️⃣  UNZIP MODULE                   │
+│  - Lit ZIP depuis input/zip/        │
+│  - Extrait vers extracted/          │
+│  - Archive ZIP traités              │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│  2️⃣  AUTO LOADER MODULE             │
+│  - Surveille extracted/             │
+│  - Ingère vers tables _staging      │
+│  - Checkpoint automatique           │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│  3️⃣  WAXNG INGESTION (main.py)      │
+│  - Lit depuis _staging              │
+│  - Validations complètes            │
+│  - Transformations                  │
+│  - Ingestion finale _all et _last   │
+│  - Logging et rapport               │
+└─────────────────────────────────────┘
