@@ -1,0 +1,450 @@
+✅ Version Complète Corrigée
+Voici le fichier autoloader_module.py complet et corrigé pour Unity Catalog :
+"""
+autoloader_module.py
+MODULE 2 : Auto Loader - Content-Based Discovery (Unity Catalog)
+Version corrigée pour Unity Catalog (_metadata.file_path)
+"""
+
+import json
+import os
+from collections import defaultdict
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import *
+
+
+class AutoLoaderModule:
+    """Module Auto Loader avec détection basée sur le contenu (Unity Catalog)"""
+    
+    def __init__(self, spark, config):
+        self.spark = spark
+        self.config = config
+        
+        # Chemins Unity Catalog
+        self.source_base = f"{config.volume_base}/extracted"
+        self.checkpoint_base = f"{config.volume_base}/checkpoints"
+        self.schema_base = f"{config.volume_base}/schemas"
+    
+    def process_all_tables(self, excel_config_path: str) -> dict:
+        """Lance Auto Loader pour tous les fichiers CSV trouvés"""
+        
+        print("=" * 80)
+        print("🔄 MODULE 2 : AUTO LOADER (CONTENT-BASED DISCOVERY)")
+        print("=" * 80)
+        
+        # Lire configuration Excel
+        import pandas as pd
+        
+        print(f"\n📖 Lecture configuration : {excel_config_path}")
+        
+        try:
+            file_tables_df = pd.read_excel(excel_config_path, sheet_name="File-Table")
+            file_columns_df = pd.read_excel(excel_config_path, sheet_name="Field-Column")
+            print(f"✅ Configuration chargée : {len(file_tables_df)} table(s)\n")
+        except Exception as e:
+            print(f"❌ Erreur lecture Excel : {e}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "ERROR", "error": str(e)}
+        
+        # Découverte des fichiers CSV
+        print(f"🔍 Scan récursif du répertoire : {self.source_base}")
+        
+        files_by_table = self._discover_csv_files(self.source_base)
+        
+        if not files_by_table:
+            print(f"⚠️  Aucun fichier CSV trouvé dans extracted/")
+            return {"status": "NO_DATA", "message": "No CSV files found"}
+        
+        print(f"\n✅ {len(files_by_table)} table(s) détectée(s) depuis les fichiers CSV :")
+        for table_name, files_info in files_by_table.items():
+            print(f"   • {table_name}: {len(files_info['files'])} fichier(s)")
+        
+        # Traiter chaque table
+        results = []
+        success_count = 0
+        failed_count = 0
+        total_rows = 0
+        
+        for idx, (table_name, files_info) in enumerate(files_by_table.items(), 1):
+            
+            print(f"\n{'=' * 80}")
+            print(f"📋 Table {idx}/{len(files_by_table)}: {table_name}")
+            print(f"{'=' * 80}")
+            
+            # Chercher config
+            table_config = self._find_table_config(table_name, file_tables_df)
+            
+            if table_config is None:
+                print(f"⚠️  Aucune configuration trouvée dans Excel pour '{table_name}'")
+                print(f"   → Utilisation de la configuration par défaut")
+                
+                table_config = {
+                    "Delta Table Name": table_name,
+                    "Input Format": "csv",
+                    "Input delimiter": ",",
+                    "Input charset": "UTF-8"
+                }
+            else:
+                print(f"✅ Configuration trouvée : table '{table_config['Delta Table Name']}'")
+            
+            print(f"📁 {len(files_info['files'])} fichier(s) CSV :")
+            for file_path in files_info['files'][:5]:
+                print(f"   • {file_path}")
+            if len(files_info['files']) > 5:
+                print(f"   ... et {len(files_info['files']) - 5} autre(s)")
+            
+            # Colonnes
+            if isinstance(table_config, dict):
+                config_table_name = table_config["Delta Table Name"]
+            else:
+                config_table_name = table_config["Delta Table Name"]
+            
+            table_columns = file_columns_df[
+                file_columns_df["Delta Table Name"] == config_table_name
+            ]
+            
+            # Traiter
+            try:
+                result = self._process_single_table(
+                    table_name,
+                    files_info,
+                    table_config, 
+                    table_columns
+                )
+                results.append(result)
+                
+                if result["status"] == "SUCCESS":
+                    print(f"✅ {result.get('rows_ingested', 0):,} ligne(s) ingérée(s)")
+                    success_count += 1
+                    total_rows += result.get('rows_ingested', 0)
+                elif result["status"] == "NO_DATA":
+                    print(f"⚠️  Aucune nouvelle donnée")
+                else:
+                    print(f"❌ Échec : {result.get('error', 'Unknown')}")
+                    failed_count += 1
+                    
+            except Exception as e:
+                print(f"❌ Erreur : {e}")
+                import traceback
+                traceback.print_exc()
+                
+                failed_count += 1
+                results.append({
+                    "table": table_name,
+                    "status": "ERROR",
+                    "error": str(e)
+                })
+        
+        # Résumé
+        print("\n" + "=" * 80)
+        print("📊 RÉSUMÉ AUTO LOADER")
+        print("=" * 80)
+        print(f"✅ Tables traitées  : {success_count}")
+        print(f"❌ Tables en échec  : {failed_count}")
+        print(f"📈 Total lignes     : {total_rows:,}")
+        print("=" * 80)
+        
+        return {
+            "status": "SUCCESS" if failed_count == 0 else "PARTIAL",
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "total_rows": total_rows,
+            "results": results
+        }
+    
+    def _discover_csv_files(self, base_dir: str) -> dict:
+        """Découvre tous les fichiers CSV et les groupe par table"""
+        
+        files_by_table = defaultdict(lambda: {"files": [], "folders": set()})
+        
+        if not os.path.exists(base_dir):
+            return {}
+        
+        for root, dirs, files in os.walk(base_dir):
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            
+            for file in files:
+                if file.startswith('.') or not file.lower().endswith('.csv'):
+                    continue
+                
+                table_name = self._extract_table_name(file)
+                
+                if table_name:
+                    file_path = os.path.join(root, file)
+                    folder_path = root
+                    
+                    files_by_table[table_name]["files"].append(file_path)
+                    files_by_table[table_name]["folders"].add(folder_path)
+        
+        for table_name in files_by_table:
+            files_by_table[table_name]["folders"] = list(files_by_table[table_name]["folders"])
+        
+        return dict(files_by_table)
+    
+    def _extract_table_name(self, filename: str) -> str:
+        """Extrait le nom de la table depuis le nom du fichier"""
+        
+        basename = os.path.splitext(filename)[0]
+        
+        if '_' in basename:
+            parts = basename.split('_')
+            for part in parts:
+                if not part.isdigit():
+                    return part.lower()
+            return parts[0].lower()
+        
+        return basename.lower()
+    
+    def _find_table_config(self, table_name: str, file_tables_df) -> dict:
+        """Cherche la configuration correspondante"""
+        
+        table_lower = table_name.lower()
+        
+        for idx, row in file_tables_df.iterrows():
+            config_table = str(row["Delta Table Name"]).strip().lower()
+            
+            if config_table == table_lower:
+                print(f"   🎯 Match exact : '{table_name}' = '{row['Delta Table Name']}'")
+                return row
+            
+            if table_lower in config_table or config_table in table_lower:
+                print(f"   🎯 Match partiel : '{table_name}' ↔ '{row['Delta Table Name']}'")
+                return row
+        
+        return None
+    
+    def _process_single_table(self, table_name: str, files_info: dict, 
+                              table_config, columns_config) -> dict:
+        """Traite une table avec Auto Loader (Unity Catalog)"""
+        
+        folders = files_info["folders"]
+        
+        if len(folders) == 1:
+            source_path = folders[0]
+        else:
+            source_path = os.path.commonpath(folders)
+        
+        checkpoint_path = f"{self.checkpoint_base}/{table_name}"
+        schema_path = f"{self.schema_base}/{table_name}"
+        
+        if isinstance(table_config, dict):
+            config_table_name = table_config["Delta Table Name"]
+        else:
+            config_table_name = table_config["Delta Table Name"]
+        
+        target_table = f"{self.config.catalog}.{self.config.schema_tables}.{config_table_name}_staging"
+        
+        print(f"\n📂 Source(s)   : {source_path}")
+        print(f"📂 Checkpoint  : {checkpoint_path}")
+        print(f"🗄️  Target      : {target_table}")
+        
+        if isinstance(table_config, dict):
+            input_format = str(table_config.get("Input Format", "csv")).strip().lower()
+            delimiter = str(table_config.get("Input delimiter", ","))
+            charset = str(table_config.get("Input charset", "UTF-8")).strip()
+        else:
+            input_format = str(table_config.get("Input Format", "csv")).strip().lower()
+            delimiter = str(table_config.get("Input delimiter", ","))
+            charset = str(table_config.get("Input charset", "UTF-8")).strip()
+        
+        if charset.lower() in ["nan", "", "none"]:
+            charset = "UTF-8"
+        
+        options = {
+            "cloudFiles.format": input_format,
+            "cloudFiles.useNotifications": "false",
+            "cloudFiles.includeExistingFiles": "true",
+            "cloudFiles.schemaLocation": schema_path,
+        }
+        
+        if input_format in ["csv", "csv_quote", "csv_quote_ml"]:
+            options.update({
+                "header": "true",
+                "delimiter": delimiter,
+                "encoding": charset,
+                "inferSchema": "false",
+                "mode": "PERMISSIVE",
+                "columnNameOfCorruptRecord": "_corrupt_record",
+                "quote": '"',
+                "escape": "\\"
+            })
+            
+            if input_format == "csv_quote_ml":
+                options["multiline"] = "true"
+        
+        print(f"\n🔄 Création stream Auto Loader...")
+        print(f"   Pattern: {table_name}_*.csv")
+        
+        try:
+            df_stream = (
+                self.spark.readStream
+                .format("cloudFiles")
+                .options(**options)
+                .load(source_path)
+            )
+            
+            # ✅ Unity Catalog : _metadata.file_path
+            df_stream = df_stream.filter(
+                (F.element_at(F.split(F.col("_metadata.file_path"), "/"), -1).startswith(f"{table_name}_"))
+                | (F.element_at(F.split(F.col("_metadata.file_path"), "/"), -1).rlike(f"^{table_name}\\.csv$"))
+            )
+            
+        except Exception as e:
+            return {"status": "ERROR", "error": f"Stream creation failed: {e}"}
+        
+        df_stream = self._add_metadata(df_stream)
+        
+        print(f"💾 Écriture vers {target_table}...")
+        
+        try:
+            query = (
+                df_stream.writeStream
+                .format("delta")
+                .outputMode("append")
+                .option("checkpointLocation", checkpoint_path)
+                .option("mergeSchema", "true")
+                .trigger(once=True)
+                .toTable(target_table)
+            )
+            
+            print(f"⏳ Traitement en cours...")
+            query.awaitTermination()
+            
+            progress = query.lastProgress
+            
+            if progress:
+                rows_ingested = progress.get("numInputRows", 0)
+                
+                if rows_ingested > 0:
+                    return {
+                        "status": "SUCCESS",
+                        "rows_ingested": rows_ingested,
+                        "target_table": target_table,
+                        "source_files": len(files_info["files"])
+                    }
+                else:
+                    return {"status": "NO_DATA", "rows_ingested": 0, "target_table": target_table}
+            else:
+                return {"status": "NO_DATA", "rows_ingested": 0, "target_table": target_table}
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"status": "ERROR", "error": f"Write failed: {e}"}
+    
+    def _add_metadata(self, df_stream):
+        """Ajoute métadonnées (Unity Catalog compatible)"""
+        
+        # ✅ Unity Catalog : _metadata.file_path
+        df_stream = df_stream.withColumn(
+            "FILE_NAME_RECEIVED",
+            F.element_at(F.split(F.col("_metadata.file_path"), "/"), -1)
+        )
+        
+        df_stream = df_stream.withColumn(
+            "yyyy",
+            F.regexp_extract(F.col("FILE_NAME_RECEIVED"), r"_(\d{4})\d{4}", 1).cast("int")
+        )
+        
+        df_stream = df_stream.withColumn(
+            "mm",
+            F.regexp_extract(F.col("FILE_NAME_RECEIVED"), r"_\d{4}(\d{2})\d{2}", 1).cast("int")
+        )
+        
+        df_stream = df_stream.withColumn(
+            "dd",
+            F.regexp_extract(F.col("FILE_NAME_RECEIVED"), r"_\d{6}(\d{2})", 1).cast("int")
+        )
+        
+        df_stream = df_stream.withColumn(
+            "INGESTION_TIMESTAMP",
+            F.current_timestamp()
+        )
+        
+        df_stream = df_stream.withColumn(
+            "FILE_PATH_RECEIVED",
+            F.col("_metadata.file_path")
+        )
+        
+        return df_stream
+    
+    def list_staging_tables(self) -> list:
+        """Liste les tables staging"""
+        try:
+            tables = self.spark.sql(
+                f"SHOW TABLES IN {self.config.catalog}.{self.config.schema_tables}"
+            ).collect()
+            return [t.tableName for t in tables if "_staging" in t.tableName]
+        except:
+            return []
+    
+    def get_staging_stats(self) -> dict:
+        """Stats des tables staging"""
+        staging_tables = self.list_staging_tables()
+        stats = {}
+        
+        for table_name in staging_tables:
+            table_full = f"{self.config.catalog}.{self.config.schema_tables}.{table_name}"
+            try:
+                df = self.spark.table(table_full)
+                count = df.count()
+                sources = []
+                if "FILE_NAME_RECEIVED" in df.columns:
+                    sources = [row.FILE_NAME_RECEIVED 
+                             for row in df.select("FILE_NAME_RECEIVED").distinct().collect()]
+                stats[table_name] = {"rows": count, "sources": sources}
+            except Exception as e:
+                stats[table_name] = {"error": str(e)}
+        
+        return stats
+
+
+def main():
+    """Point d'entrée"""
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from config import Config
+    
+    print("🚀 Démarrage Module 2 : Auto Loader (Unity Catalog)")
+    
+    spark = SparkSession.builder.appName("WAX-Module2-AutoLoader").getOrCreate()
+    
+    config = Config(
+        catalog="abu_catalog",
+        schema_files="databricksassetbundletest",
+        volume="externalvolumetes",
+        schema_tables="gdp_poc_dev",
+        env="dev",
+        version="v1"
+    )
+    
+    excel_path = f"{config.volume_base}/input/config/wax_config.xlsx"
+    
+    autoloader = AutoLoaderModule(spark, config)
+    result = autoloader.process_all_tables(excel_path)
+    
+    if result["status"] in ["SUCCESS", "PARTIAL"]:
+        print("\n📋 Tables staging créées :")
+        stats = autoloader.get_staging_stats()
+        for table_name, table_stats in stats.items():
+            if "error" not in table_stats:
+                print(f"   • {table_name}: {table_stats['rows']:,} lignes")
+                if table_stats.get('sources'):
+                    print(f"     Sources: {', '.join(table_stats['sources'][:3])}")
+    
+    if result["status"] == "SUCCESS":
+        print("\n✅ Module 2 terminé avec succès")
+        return 0
+    elif result["status"] == "PARTIAL":
+        print("\n⚠️  Module 2 terminé avec des erreurs partielles")
+        return 1
+    else:
+        print(f"\n❌ Module 2 terminé avec erreurs")
+        return 2
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
