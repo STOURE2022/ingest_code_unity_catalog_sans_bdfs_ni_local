@@ -1,0 +1,60 @@
+# ==================== VALIDATION COLONNES ====================
+
+def validate_columns_presence(self, df: DataFrame, expected_cols: list,
+                              table_name: str, filename: str) -> dict:
+    """
+    Vérifie présence des colonnes attendues
+    Les colonnes sont déjà normalisées en lowercase par l'Auto Loader
+    
+    Args:
+        df: DataFrame à valider (colonnes déjà en lowercase)
+        expected_cols: Liste des colonnes attendues (en lowercase depuis Excel)
+        table_name: Nom de la table
+        filename: Nom du fichier
+        
+    Returns:
+        dict: {
+            "missing_columns": list,
+            "df_errors": DataFrame ou None
+        }
+    """
+    
+    # Identifier colonnes manquantes
+    # Les colonnes sont déjà normalisées, comparaison directe
+    df_cols = set(df.columns)
+    expected = set(expected_cols)
+    
+    # Colonnes vraiment manquantes (pas dans le CSV)
+    missing_cols = expected - df_cols
+    
+    if not missing_cols:
+        print(f"✅ Validation colonnes : Toutes les colonnes présentes")
+        return {
+            "missing_columns": [],
+            "df_errors": None
+        }
+    
+    # Il y a des colonnes manquantes (absentes du CSV source)
+    missing_list = sorted(missing_cols)
+    print(f"ℹ️  Colonnes absentes du CSV (seront ajoutées avec NULL) : {len(missing_list)}")
+    print(f"   {missing_list[:5]}{'...' if len(missing_list) > 5 else ''}")
+    
+    # Créer DataFrame d'info (pas d'erreur, juste pour traçabilité)
+    df_info = self.spark.createDataFrame(
+        [(filename, col, "INFO_MISSING_COLUMN") for col in missing_list],
+        "filename STRING, column_name STRING, error_type STRING"
+    )
+    
+    df_info = (
+        df_info
+        .withColumn("table_name", F.lit(table_name))
+        .withColumn("error_message", 
+                   F.concat(F.lit("Column '"), F.col("column_name"), 
+                           F.lit("' not present in source CSV, added with NULL")))
+        .withColumn("raw_value", F.lit(None).cast("string"))
+    )
+    
+    return {
+        "missing_columns": missing_list,
+        "df_errors": df_info
+    }
