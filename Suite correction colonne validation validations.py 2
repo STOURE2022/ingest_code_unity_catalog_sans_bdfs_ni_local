@@ -1,0 +1,100 @@
+def _process_single_table(self, table_name: str, files_info: dict, 
+                          table_config, columns_config) -> dict:
+    """
+    Traite une table avec Auto Loader (Unity Catalog)
+    """
+    
+    # ... code existant (chemins, config, etc.) ...
+    
+    # Configuration lecture
+    if isinstance(table_config, dict):
+        input_format = str(table_config.get("Input Format", "csv")).strip().lower()
+        delimiter = str(table_config.get("Input delimiter", ","))
+        charset = str(table_config.get("Input charset", "UTF-8")).strip()
+        input_header = str(table_config.get("Input header", "")).strip().upper()  # ← LIRE ICI
+    else:
+        input_format = str(table_config.get("Input Format", "csv")).strip().lower()
+        delimiter = str(table_config.get("Input delimiter", ","))
+        charset = str(table_config.get("Input charset", "UTF-8")).strip()
+        input_header = str(table_config.get("Input header", "")).strip().upper()  # ← LIRE ICI
+    
+    if charset.lower() in ["nan", "", "none"]:
+        charset = "UTF-8"
+    
+    # Options Auto Loader
+    options = {
+        "cloudFiles.format": input_format,
+        "cloudFiles.useNotifications": "false",
+        "cloudFiles.includeExistingFiles": "true",
+        "cloudFiles.schemaLocation": schema_path,
+    }
+    
+    # Options CSV
+    if input_format in ["csv", "csv_quote", "csv_quote_ml"]:
+        options.update({
+            "header": "true",  # Le CSV a toujours un header
+            "delimiter": delimiter,
+            "encoding": charset,
+            "inferSchema": "false",
+            "mode": "PERMISSIVE",
+            "columnNameOfCorruptRecord": "_corrupt_record",
+            "quote": '"',
+            "escape": "\\"
+        })
+        
+        if input_format == "csv_quote_ml":
+            options["multiline"] = "true"
+    
+    print(f"\n🔄 Création stream Auto Loader...")
+    print(f"   Pattern: {table_name}_*.csv")
+    print(f"   Input header mode: {input_header}")
+    
+    try:
+        # Lire avec Auto Loader
+        df_stream = (
+            self.spark.readStream
+            .format("cloudFiles")
+            .options(**options)
+            .load(source_path)
+        )
+        
+        # ✅ NORMALISATION DES COLONNES EN LOWERCASE
+        if input_header == "HEADER_USE":
+            print(f"   → Mode HEADER_USE : Normalisation colonnes en lowercase")
+            
+            # Créer mapping old_name → new_name
+            column_mapping = {col: col.lower() for col in df_stream.columns 
+                            if not col.startswith("_")}  # Garder _metadata, _corrupt_record
+            
+            # Renommer toutes les colonnes
+            for old_col, new_col in column_mapping.items():
+                if old_col != new_col:  # Éviter renommage inutile
+                    df_stream = df_stream.withColumnRenamed(old_col, new_col)
+            
+            print(f"   → {len(column_mapping)} colonne(s) normalisée(s)")
+        
+        elif input_header == "FIRST_LINE":
+            print(f"   → Mode FIRST_LINE : Header ignoré, colonnes nommées selon Excel")
+            # Dans ce cas, Auto Loader a déjà créé des colonnes _c0, _c1, etc.
+            # Il faudrait les renommer selon l'ordre de l'Excel
+            # (À implémenter si nécessaire)
+        
+        else:
+            print(f"   → Mode par défaut : Colonnes utilisées telles quelles")
+        
+        # Filtrer par nom de fichier pour ne garder que cette table
+        df_stream = df_stream.filter(
+            (F.element_at(F.split(F.col("_metadata.file_path"), "/"), -1).startswith(f"{table_name}_"))
+            | (F.element_at(F.split(F.col("_metadata.file_path"), "/"), -1).rlike(f"^{table_name}\\.csv$"))
+        )
+        
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Stream creation failed: {e}"}
+    
+    # Ajouter métadonnées
+    df_stream = self._add_metadata(df_stream)
+    
+    # Écrire dans table staging
+    print(f"💾 Écriture vers {target_table}...")
+    
+    # ... reste du code (writeStream, etc.) ...
